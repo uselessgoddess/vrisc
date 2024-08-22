@@ -1,4 +1,7 @@
-use crate::{Cpu, Exception};
+use crate::{
+  cpu::{BYTE, DWORD, HALF, WORD},
+  Cpu, Exception,
+};
 
 impl Cpu {
   pub(crate) fn execute_general(&mut self, inst: u64) -> Result<(), Exception> {
@@ -25,6 +28,58 @@ impl Cpu {
         match funct3 {
           0x0 => inst!("addi" => {
             self.xregs.store(rd, self.xregs.load(rs1).wrapping_add(imm));
+          }),
+          0x1 => inst!("slli" => {
+            let shift = (inst >> 20) & 0x3f;
+            self.xregs.store(rd, self.xregs.load(rs1) << shift);
+          }),
+          0x2 => inst!("slti" => {
+            let bit = if (self.xregs.load(rs1) as i64) < (imm as i64) { 1 } else { 0 };
+            self.xregs.store(rd, bit);
+          }),
+          0x3 => inst!("sltiu" => {
+            self.xregs.store(rd, if self.xregs.load(rs1) < imm  { 1 } else { 0 });
+          }),
+          0x4 => inst!("xori" => {
+            self.xregs.store(rd, self.xregs.load(rs1) ^ imm);
+          }),
+          0x5 => match funct6 {
+            0x00 => inst!("srli" => {
+              let shift = (inst >> 20) & 0x3f;
+              self.xregs.store(rd, self.xregs.load(rs1) >> shift);
+            }),
+            0x10 => inst!("srai" => {
+              let shift = (inst >> 20) & 0x3f;
+              self.xregs.store(rd, ((self.xregs.load(rs1) as i64) >> shift) as u64);
+            }),
+            _ => return Err(Exception::IllegalInst(inst)),
+          },
+          0x6 => inst!("ori" => {
+            self.xregs.store(rd, self.xregs.load(rs1) | imm);
+          }),
+          0x7 => inst!("andi" => {
+            self.xregs.store(rd, self.xregs.load(rs1) & imm);
+          }),
+          _ => return Err(Exception::IllegalInst(inst)),
+        }
+      }
+      0x23 => {
+        // offset[11:5|4:0] = inst[31:25|11:7]
+        let offset = (((inst & 0xfe000000) as i32 as i64 >> 20) as u64)
+          | ((inst >> 7) & 0x1f);
+        let addr = self.xregs.load(rs1).wrapping_add(offset);
+        match funct3 {
+          0x0 => inst!("sb" => {
+            self.store(addr, self.xregs.load(rs2), BYTE);
+          }),
+          0x1 => inst!("sh" => {
+            self.store(addr, self.xregs.load(rs2), HALF);
+          }),
+          0x2 => inst!("sw" => {
+            self.store(addr, self.xregs.load(rs2), WORD);
+          }),
+          0x3 => inst!("sd" => {
+            self.store(addr, self.xregs.load(rs2), DWORD);
           }),
           _ => return Err(Exception::IllegalInst(inst)),
         }

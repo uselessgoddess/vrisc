@@ -1,4 +1,4 @@
-use crate::{bus::dram, Bus, Dram, Exception, Trap, DRAM_SIZE};
+use crate::{bus::dram, Bus, Dram, Exception, State, Trap, DRAM_SIZE};
 
 pub const REG_COUNT: usize = 32;
 pub const POINTER_TO_DTB: u64 = 0x1020;
@@ -49,12 +49,18 @@ pub const DWORD: u8 = 64;
 pub struct Cpu {
   pub xregs: Xregs,
   pub pc: u64,
+  pub state: State,
   pub bus: Bus,
 }
 
 impl Cpu {
   pub fn new() -> Self {
-    Self { xregs: Xregs::new(), pc: 0, bus: Bus { dram: Dram::new() } }
+    Self {
+      xregs: Xregs::new(),
+      pc: 0,
+      state: State::new(),
+      bus: Bus { dram: Dram::new() },
+    }
   }
 
   fn debug(&self, _inst: u64, _name: &str) {}
@@ -76,6 +82,16 @@ impl Cpu {
 
     // TODO: there is no csr manipulation for now
     Trap::from_ex(ex)
+  }
+
+  pub(crate) fn store(
+    &mut self,
+    v_addr: u64,
+    value: u64,
+    size: u8,
+  ) -> Result<(), Exception> {
+    let p_addr = self.translate(v_addr, AccessType::Store)?;
+    self.bus.store(p_addr, value, size)
   }
 
   pub fn fetch(&mut self, size: u8) -> Result<u64, Exception> {

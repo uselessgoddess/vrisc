@@ -1,5 +1,5 @@
 use {
-  std::ops::RangeBounds,
+  std::{ops::RangeBounds, time::Instant},
   vrisc::{bus::dram, Emu, Xregs, REG_COUNT},
 };
 
