@@ -6,3 +6,6 @@ edition = "2021"
 [[bin]]
 name = "cli"
 path = "src/cli.rs"
+
+[dependencies]
+object = "0.36"

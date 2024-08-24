@@ -63,7 +63,9 @@ impl Cpu {
     }
   }
 
-  fn debug(&self, _inst: u64, _name: &str) {}
+  pub(crate) fn debug(&self, _inst: u64, _name: &str) {
+    println!("DEBUG INST: {_name}");
+  }
 
   /// Translate a virtual address to a physical address for the paged virtual-memory system.
   fn translate(

@@ -1,6 +1,6 @@
 use {
-  std::{ops::RangeBounds, time::Instant},
-  vrisc::{bus::dram, Emu, Xregs, REG_COUNT},
+  std::{fs, ops::RangeBounds, time::Instant},
+  vrisc::{bus::dram, Emu, Exception, Xregs, REG_COUNT},
 };
 
 pub const SP: u64 = dram::END;
@@ -37,7 +37,13 @@ fn main() {
     0x33, 0x81, 0x41, 0x00, // add x2, x3, x4
   ];
 
-  run(&mut emu, &data, xregs!(x2 = 11, x3 = 5, x4 = 6));
+  // run(&mut emu, &data, xregs!(x2 = 11, x3 = 5, x4 = 6));
+
+  {
+    let bin = fs::read("riscv-tests/isa/rv32ui-p-addi.bin").unwrap();
+    // let bin = fs::read("riscv-tests/isa/rv32ui-p-addi.bin").unwrap();
+    run(&mut emu, &bin, xregs!());
+  }
 }
 
 fn run(emu: &mut Emu, data: &[u8], xregs: [u64; REG_COUNT]) {
@@ -50,12 +56,13 @@ fn run(emu: &mut Emu, data: &[u8], xregs: [u64; REG_COUNT]) {
       break;
     }
 
+    println!("pc: {:x}", emu.cpu.pc);
     match emu.cycle() {
       Ok(inst) => {
-        println!("inst: {inst:#x}")
+        println!("pc: {:x}, inst: {inst:#x}", emu.cpu.pc.wrapping_sub(4));
       }
       Err(ex) => {
-        println!("exception: {ex:?}");
+        std::thread::sleep_ms(100);
       }
     }
   }
