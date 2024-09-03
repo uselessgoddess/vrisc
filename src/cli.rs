@@ -40,7 +40,7 @@ fn main() {
   // run(&mut emu, &data, xregs!(x2 = 11, x3 = 5, x4 = 6));
 
   {
-    let bin = fs::read("riscv-tests/isa/rv32ui-p-addi.bin").unwrap();
+    let bin = fs::read("rv32-addi.bin").unwrap();
     // let bin = fs::read("riscv-tests/isa/rv32ui-p-addi.bin").unwrap();
     run(&mut emu, &bin, xregs!());
   }
@@ -52,19 +52,25 @@ fn run(emu: &mut Emu, data: &[u8], xregs: [u64; REG_COUNT]) {
   let start = dram::ADDR;
   let end = start + data.len() as u64;
   loop {
-    if !(start..end).contains(&emu.cpu.pc) {
-      break;
-    }
+    // if !(start..end).contains(&emu.cpu.pc) {
+    //   break;
+    // }
 
-    println!("pc: {:x}", emu.cpu.pc);
     match emu.cycle() {
       Ok(inst) => {
         println!("pc: {:x}, inst: {inst:#x}", emu.cpu.pc.wrapping_sub(4));
       }
       Err(ex) => {
+        println!(
+          "pc: {pc:#x}, inst: {inst:#x}",
+          inst = emu.cpu.fetch(32).unwrap(),
+          pc = emu.cpu.pc,
+        );
         std::thread::sleep_ms(100);
+        emu.cpu.catch_exception(ex);
       }
     }
+    println!("{:?}", emu.cpu.xregs);
   }
 
   for (i, &rx) in xregs.iter().enumerate() {

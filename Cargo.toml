@@ -3,9 +3,13 @@ name = "vrisc"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = ["macros"]
+
 [[bin]]
 name = "cli"
 path = "src/cli.rs"
 
 [dependencies]
 object = "0.36"
+macros = { path = "macros" }

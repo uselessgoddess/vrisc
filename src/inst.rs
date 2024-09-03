@@ -1,12 +1,15 @@
-use crate::{
-  cpu::{BYTE, DWORD, HALF, WORD},
-  Cpu, Exception,
+use {
+  crate::{
+    cpu::{Mode, BYTE, DWORD, HALF, WORD},
+    Cpu, Exception,
+  },
+  macros::{imm, slice},
 };
 
 impl Cpu {
   pub(crate) fn execute_general(&mut self, inst: u64) -> Result<(), Exception> {
     macro_rules! inst {
-      ($name:literal => { $($tt:tt)* }) => {
+      ($name:expr => $($tt:tt)*) => {
         { self.debug(inst, $name); $($tt)* }
       };
     }
@@ -22,8 +25,7 @@ impl Cpu {
 
     Ok(match opcode {
       0x13 => {
-        // imm[11:0] = inst[31:20]
-        let imm = (inst as i32 as i64 >> 20) as u64;
+        let imm = slice![inst in 31:20];
         let funct6 = funct7 >> 1;
         match funct3 {
           0x0 => inst!("addi" => {
@@ -64,10 +66,8 @@ impl Cpu {
         }
       }
       0x23 => {
-        // offset[11:5|4:0] = inst[31:25|11:7]
-        let offset = (((inst & 0xfe000000) as i32 as i64 >> 20) as u64)
-          | ((inst >> 7) & 0x1f);
-        let addr = self.xregs.load(rs1).wrapping_add(offset);
+        let imm = slice![inst in 31:25|11:7]; // see (macros.rs tests)
+        let addr = self.xregs.load(rs1).wrapping_add(imm);
         match funct3 {
           0x0 => inst!("sb" => {
             self.store(addr, self.xregs.load(rs2), BYTE)?;
@@ -90,6 +90,45 @@ impl Cpu {
         }),
         _ => return Err(Exception::IllegalInst(inst)),
       },
+      0x63 => {
+        let imm = imm![ // see (macros.rs tests)
+          slice![inst in 31:25|11:7] in 12|10:5|4:1|11
+        ];
+
+        match funct3 {
+          0x0 => inst!("beq" =>
+            if self.xregs.load(rs1) == self.xregs.load(rs2) {
+              self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+            }
+          ),
+          0x1 => inst!("bne" =>
+            if self.xregs.load(rs1) != self.xregs.load(rs2) {
+              self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+            }
+          ),
+          0x4 => inst!("blt" =>
+            if (self.xregs.load(rs1) as i64) < self.xregs.load(rs2) as i64 {
+              self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+            }
+          ),
+          0x5 => inst!("bge" =>
+            if self.xregs.load(rs1) as i64 >= self.xregs.load(rs2) as i64 {
+              self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+            }
+          ),
+          0x6 => inst!("bltu" =>
+            if self.xregs.load(rs1) < self.xregs.load(rs2) {
+              self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+            }
+          ),
+          0x7 => inst!("bgeu" =>
+            if self.xregs.load(rs1) >= self.xregs.load(rs2) {
+              self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+            }
+          ),
+          _ => return Err(Exception::IllegalInst(inst)),
+        }
+      }
       0x67 => inst!("jalr" => {
         let t = self.pc.wrapping_add(4);
 
@@ -108,6 +147,46 @@ impl Cpu {
           | ((inst >> 20) & 0x7fe);
         self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
       }),
+      0x73 => {
+        let csr = (inst >> 20 & 0xfff) as u16;
+        match funct3 {
+          0x0 => match (rs2, funct7) {
+            (0x0, 0x0) => inst!("ecall" => {
+              return Err(match self.mode {
+                Mode::User => Exception::ECallUser,
+                Mode::Supervisor => Exception::ECallSuper,
+                Mode::Machine => Exception::ECallMachine,
+                _ => Exception::IllegalInst(inst),
+              });
+            }),
+            (0x1, 0x0) => inst!("ebreak" => return Err(Exception::Breakpoint)),
+            (0x2, 0x0) => inst!("uret" => todo!()),
+            (0x2, 0x8) => inst!("sret" => todo!()),
+            (0x2, 0x18) => inst!("mret" => todo!()),
+            _ => return Err(Exception::IllegalInst(inst)),
+          },
+          op @ (0x1 | 0x2 | 0x3 | 0x5 | 0x6 | 0x7) => {
+            let imm = rs1;
+            let t = self.state.load(csr);
+            let r1 = self.xregs.load(rs1);
+            let (name, reg) = match op {
+              0x1 => ("csrrw", r1),
+              0x2 => ("csrrs", t | r1),
+              0x3 => ("csrrc", t & !r1),
+              0x5 => ("csrrwi", imm),
+              0x6 => ("csrrsi", t | imm),
+              0x7 => ("csrrci", t & !imm),
+              _ => unreachable!(),
+            };
+            inst!(name => {
+              self.state.store(csr, reg);
+              self.xregs.store(rd, t);
+            })
+          }
+          _ => return Err(Exception::IllegalInst(inst)),
+        }
+        // TODO: handle SATP register write
+      }
       _ => return Err(Exception::IllegalInst(inst)),
     })
   }

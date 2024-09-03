@@ -1,10 +1,14 @@
-use crate::{bus::dram, Bus, Dram, Exception, State, Trap, DRAM_SIZE};
+use crate::{
+  bus::dram,
+  csr::{x, MCAUSE, MEDELEG, MEPC, MTVAL, MTVEC},
+  Bus, Dram, Exception, State, Trap, DRAM_SIZE,
+};
 
 pub const REG_COUNT: usize = 32;
 pub const POINTER_TO_DTB: u64 = 0x1020;
 
 /// Access type that is used in the virtual address translation process. It decides which exception
-/// should raises (InstructionPageFault, LoadPageFault or StoreAMOPageFault).
+/// should raises (InstPageFault, LoadPageFault or StoreAMOPageFault).
 #[derive(Debug, PartialEq, PartialOrd)]
 pub enum AccessType {
   /// Raises the exception InstructionPageFault. It is used for an instruction fetch.
@@ -13,6 +17,14 @@ pub enum AccessType {
   Load,
   /// Raises the exception StoreAMOPageFault.
   Store,
+}
+
+#[derive(Debug, PartialEq, PartialOrd, Eq, Copy, Clone)]
+pub enum Mode {
+  User = 0b00,
+  Supervisor = 0b01,
+  Machine = 0b11,
+  Debug,
 }
 
 #[derive(Debug)]
@@ -37,7 +49,9 @@ impl Xregs {
   }
 
   pub fn store(&mut self, index: u64, value: u64) {
-    self.xregs[index as usize] = value;
+    if index != 0 {
+      self.xregs[index as usize] = value;
+    }
   }
 }
 
@@ -51,6 +65,7 @@ pub struct Cpu {
   pub pc: u64,
   pub state: State,
   pub bus: Bus,
+  pub mode: Mode,
 }
 
 impl Cpu {
@@ -60,6 +75,7 @@ impl Cpu {
       pc: 0,
       state: State::new(),
       bus: Bus { dram: Dram::new() },
+      mode: Mode::Machine,
     }
   }
 
@@ -77,12 +93,30 @@ impl Cpu {
   }
 
   pub fn catch_exception(&mut self, ex: Exception) -> Trap {
-    // TODO: there is no implemented way to handle illegal instruction by invisible traps
-    if let Exception::IllegalInst(_) = ex {
-      return Trap::Fatal;
+    let pc = ex.epc(self.pc);
+    let cause = ex.cause();
+    let prev = self.mode;
+
+    if prev < Mode::Machine && (self.state.load(MEDELEG) >> cause) & 1 == 1 {
+      todo!("unimplemented")
+    } else {
+      self.mode = Mode::Machine;
+
+      self.pc = self.state.load(MTVEC) & !1;
+
+      self.state.store(MEPC, pc & !1);
+      self.state.store(MCAUSE, cause);
+      self.state.store(MTVAL, ex.mtval(pc));
+
+      self.state.store_mstatus(x::MPIE, self.state.load_mstatus(x::MIE));
+      self.state.store_mstatus(x::MIE, 0);
+      if let Mode::Machine | Mode::Supervisor | Mode::Supervisor = prev {
+        self.state.store_mstatus(x::MPP, prev as u64)
+      } else {
+        panic!("privilege mode is invalid")
+      }
     }
 
-    // TODO: there is no csr manipulation for now
     Trap::from_ex(ex)
   }
 

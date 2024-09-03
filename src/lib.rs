@@ -5,6 +5,7 @@ mod dram;
 mod emu;
 mod inst;
 mod trap;
+pub mod utils;
 
 pub use {
   bus::Bus,
