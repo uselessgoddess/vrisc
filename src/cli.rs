@@ -52,9 +52,9 @@ fn run(emu: &mut Emu, data: &[u8], xregs: [u64; REG_COUNT]) {
   let start = dram::ADDR;
   let end = start + data.len() as u64;
   loop {
-    // if !(start..end).contains(&emu.cpu.pc) {
-    //   break;
-    // }
+    if !(start..end).contains(&emu.cpu.pc) {
+      break;
+    }
 
     match emu.cycle() {
       Ok(inst) => {
@@ -66,8 +66,14 @@ fn run(emu: &mut Emu, data: &[u8], xregs: [u64; REG_COUNT]) {
           inst = emu.cpu.fetch(32).unwrap(),
           pc = emu.cpu.pc,
         );
-        std::thread::sleep_ms(100);
+
+        if let Exception::IllegalInst(inst) = ex {
+          panic!("invalid instruction: 0x{inst:x}");
+        }
+
         emu.cpu.catch_exception(ex);
+
+        std::thread::sleep_ms(100);
       }
     }
     println!("{:?}", emu.cpu.xregs);

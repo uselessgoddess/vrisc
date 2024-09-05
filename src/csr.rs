@@ -1,18 +1,19 @@
-use std::ops::Range;
+use std::cmp::{max, min};
 
 pub type Addr = u16;
+pub type Range = (usize, usize);
 
 pub const MXLEN: usize = 64;
 pub const REGISTERS: usize = 1 << 12;
 
 macro_rules! bits {
-    [{$a:literal:$b:literal}] => { $a..$b + 1 };
-    [{$x:literal}] => { $x..$x + 1 };
+    [{$a:literal:$b:literal}] => { ($a, $b + 1) };
+    [{$x:literal}] => { ($x, $x + 1) };
 }
 
 macro_rules! field {
   ($name:ident = $($tt:tt)*) => {
-    pub const $name: std::ops::Range<usize> = bits![{ $($tt)* }];
+    pub const $name: crate::csr::Range = bits![{ $($tt)* }];
   };
 }
 
@@ -23,10 +24,28 @@ macro_rules! reg {
       pub const $name: Addr = $expr;
     )*
   };
+
+  {$desc:literal as $ty:ident $(#[doc = $doc:expr] $name:ident = $expr:expr)*} => {
+    $(
+      #[doc = $doc]
+      pub const $name: $ty = $expr;
+    )*
+  };
+}
+
+macro_rules! mask {
+  {$($field:expr)*} => {
+    $(mask::<{ $field }>() )|*
+  };
+}
+
+reg! { "User Counter/Timers"
+  /// Timer for RDTIME instruction
+  TIME = 0xc01
 }
 
 reg! { "Supervisor traps setup"
-  /// Machine status register.
+  /// Machine status register
   SSTATUS = 0x100
   /// Machine exception delegation
   SEDELEG = 0x102
@@ -36,6 +55,17 @@ reg! { "Supervisor traps setup"
   SIE = 0x104
   /// Machine trap-handler base address
   STVEC = 0x105
+}
+
+reg! { "Supervisor traps handling"
+  /// Supervisor exception program counter
+  SEPC = 0x141
+  /// Supervisor trap cause
+  SCAUSE = 0x142
+  /// Supervisor bad address or instruction
+  STVAL = 0x143
+  /// Supervisor interrupt pending
+  SIP = 0x144
 }
 
 reg! { "Machine traps setup"
@@ -63,6 +93,36 @@ reg! { "Machine traps handling"
   /// Machine interrupt pending
   MIP = 0x344
 }
+
+reg! { "MIP fields" as u64
+  /// Supervisor software interrupt.
+  SSIP_BIT= 1 << 1
+  /// Machine software interrupt.
+  MSIP_BIT = 1 << 3
+  /// Supervisor timer interrupt.
+  STIP_BIT = 1 << 5
+  /// Machine timer interrupt.
+  MTIP_BIT= 1 << 7
+  /// Supervisor external interrupt.
+  SEIP_BIT= 1 << 9
+  /// Machine external interrupt.
+  MEIP_BIT = 1 << 11
+}
+
+const fn mask<const R: Range>() -> u64 {
+  let (start, end) = R;
+  let len = end - start;
+
+  (u64::MAX >> (64 - len)) << start
+}
+
+const _: () = {
+  assert!(mask::<{ x::SIE }>() == 0b10);
+  assert!(mask::<{ x::SPIE }>() == 0b100000);
+  assert!(mask::<{ x::MPP }>() == 0b1100000000000);
+};
+
+const SSTATUS_MASK: u64 = mask! { x::SIE x::SPIE x::SPP };
 
 pub mod x {
   field![SIE = 1:1];
@@ -95,50 +155,62 @@ impl State {
     Self { regs }
   }
 
+  pub fn cycle_time(&mut self) {
+    self.regs[TIME as usize] = self.regs[TIME as usize].wrapping_add(1);
+  }
+
   pub fn load(&self, addr: Addr) -> u64 {
     match addr {
+      SSTATUS => self.regs[MSTATUS as usize] & SSTATUS_MASK,
+      SIE => self.regs[MIE as usize] & self.regs[MIDELEG as usize],
+      SIP => self.regs[MIP as usize] & self.regs[MIDELEG as usize],
       _ => self.regs[addr as usize],
     }
   }
 
   pub fn store(&mut self, addr: Addr, val: u64) {
     match addr {
+      SSTATUS => {
+        self.regs[MSTATUS as usize] =
+          (self.regs[MSTATUS as usize] & !SSTATUS_MASK) | (val & SSTATUS_MASK);
+      }
+      SIE => {
+        self.regs[MIE as usize] = (self.regs[MIE as usize]
+          & !self.regs[MIDELEG as usize])
+          | (val & self.regs[MIDELEG as usize]);
+      }
+      SIP => {
+        let mask = SSIP_BIT & self.regs[MIDELEG as usize];
+        self.regs[MIP as usize] =
+          (self.regs[MIP as usize] & !mask) | (val & mask);
+      }
       _ => self.regs[addr as usize] = val,
     }
   }
 
-  pub fn store_bits(
-    &mut self,
-    addr: Addr,
-    Range { start, end }: Range<usize>,
-    val: u64,
-  ) {
+  pub fn store_bits(&mut self, addr: Addr, (start, end): Range, val: u64) {
     let mask = (!0 << end) | !(!0 << start);
     self.store(addr, (self.load(addr) & mask) | (val << start))
   }
 
-  pub fn load_bits(
-    &self,
-    addr: Addr,
-    Range { start, end }: Range<usize>,
-  ) -> u64 {
+  pub fn load_bits(&self, addr: Addr, (start, end): Range) -> u64 {
     let mask = if end != MXLEN { !0 << end } else { 0 };
     (self.load(addr) & !mask) >> start
   }
 
-  pub fn load_sstatus(&self, bits: Range<usize>) -> u64 {
+  pub fn load_sstatus(&self, bits: Range) -> u64 {
     self.load_bits(SSTATUS, bits)
   }
 
-  pub fn load_mstatus(&self, bits: Range<usize>) -> u64 {
+  pub fn load_mstatus(&self, bits: Range) -> u64 {
     self.load_bits(MSTATUS, bits)
   }
 
-  pub fn store_sstatus(&mut self, bits: Range<usize>, val: u64) {
+  pub fn store_sstatus(&mut self, bits: Range, val: u64) {
     self.store_bits(SSTATUS, bits, val);
   }
 
-  pub fn store_mstatus(&mut self, bits: Range<usize>, val: u64) {
+  pub fn store_mstatus(&mut self, bits: Range, val: u64) {
     self.store_bits(MSTATUS, bits, val);
   }
 }

@@ -24,6 +24,18 @@ impl Cpu {
     );
 
     Ok(match opcode {
+      // fences unimplemented because of single-threading and seq execution
+      0x0f => match funct3 {
+        0x0 => inst!("fence" => {
+          /* nop */
+        }),
+        0x1 => inst!("fence.i" => {
+          /* nop */
+        }),
+        _ => {
+          return Err(Exception::IllegalInst(inst));
+        }
+      },
       0x13 => {
         let imm = slice![inst in 31:20];
         let funct6 = funct7 >> 1;
@@ -65,6 +77,9 @@ impl Cpu {
           _ => return Err(Exception::IllegalInst(inst)),
         }
       }
+      0x17 => inst!("auipc" =>
+        self.xregs.store(rd, self.pc.wrapping_add(slice![inst in 31:12]))
+      ),
       0x23 => {
         let imm = slice![inst in 31:25|11:7]; // see (macros.rs tests)
         let addr = self.xregs.load(rs1).wrapping_add(imm);
@@ -90,6 +105,7 @@ impl Cpu {
         }),
         _ => return Err(Exception::IllegalInst(inst)),
       },
+      0x37 => inst!("lui" => self.xregs.store(rd, inst & 0xfffff000)),
       0x63 => {
         let imm = imm![ // see (macros.rs tests)
           slice![inst in 31:25|11:7] in 12|10:5|4:1|11

@@ -22,10 +22,7 @@ impl Exception {
       Exception::Breakpoint
       | Exception::ECallUser
       | Exception::ECallSuper
-      | Exception::ECallMachine
-      | Exception::InstPageFault(_)
-      | Exception::LoadPageFault(_)
-      | Exception::StoreAMOPageFault(_) => pc,
+      | Exception::ECallMachine => pc,
       _ => pc.wrapping_add(4),
     }
   }

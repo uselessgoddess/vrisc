@@ -41,6 +41,10 @@ fn slice() {
   assert_eq!(2222, repr(0x0a0057e3)); // bge x0, x0, 2222
   assert_eq!(0, repr(0x00000063)); // beq x0, x0, 0
 
-  let repr = |inst: u64| slice![inst in 31:25|11:7];
-  assert_eq!(1234, repr(0x4c000923)); // sb x0, 1234(x0)
+  let store = |inst: u64| slice![inst in 31:25|11:7];
+  assert_eq!(1234, store(0x4c000923)); // sb x0, 1234(x0)
+
+  let auipc = |inst: u64| slice![inst in 31:12];
+  assert_eq!(0, auipc(0x297)); // auipc x5, 0  
+  assert_eq!(184185, auipc(0x2cf79017)); // auipc x0, 184185
 }

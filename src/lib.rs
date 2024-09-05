@@ -1,3 +1,5 @@
+#![feature(adt_const_params)]
+
 pub mod bus;
 mod cpu;
 mod csr;
