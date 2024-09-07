@@ -134,6 +134,7 @@ pub mod x {
   field![MPP = 11:12];
 }
 
+#[derive(Debug)]
 pub struct State {
   regs: [u64; REGISTERS],
 }

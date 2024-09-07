@@ -27,7 +27,7 @@ pub enum Mode {
   Debug,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Xregs {
   xregs: [u64; REG_COUNT],
 }
@@ -60,22 +60,23 @@ pub const HALF: u8 = 16;
 pub const WORD: u8 = 32;
 pub const DWORD: u8 = 64;
 
+#[derive(Debug)]
 pub struct Cpu {
-  pub xregs: Xregs,
   pub pc: u64,
+  pub mode: Mode,
+  pub xregs: Xregs,
   pub state: State,
   pub bus: Bus,
-  pub mode: Mode,
 }
 
 impl Cpu {
-  pub fn new() -> Self {
+  pub fn new(cap: usize) -> Self {
     Self {
-      xregs: Xregs::new(),
       pc: 0,
-      state: State::new(),
-      bus: Bus { dram: Dram::new() },
       mode: Mode::Machine,
+      xregs: Xregs::new(),
+      state: State::new(),
+      bus: Bus { dram: Dram::with_capacity(cap) },
     }
   }
 

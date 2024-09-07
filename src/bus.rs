@@ -16,6 +16,7 @@ devices! {
   dram = [0x8000_0000; DRAM_SIZE];
 }
 
+#[derive(Debug)]
 pub struct Bus {
   pub dram: Dram,
 }

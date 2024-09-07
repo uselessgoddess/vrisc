@@ -29,7 +29,7 @@ macro_rules! xregs {
 }
 
 fn main() {
-  let mut emu = Emu::new();
+  let mut emu = Emu::new(1024 * 1024); // 1Mb ram
 
   let data = [
     0x93, 0x01, 0x50, 0x00, // addi x3, x0, 5

@@ -6,6 +6,7 @@ use crate::{
 
 pub const DRAM_SIZE: u64 = 1024 * 1024 * 1024;
 
+#[derive(Debug)]
 pub struct Dram {
   dram: Vec<u8>,
 }
@@ -15,8 +16,20 @@ impl Dram {
     Self { dram: vec![0; DRAM_SIZE as usize] }
   }
 
+  pub fn with_capacity(cap: usize) -> Dram {
+    Self { dram: vec![0; cap] }
+  }
+
   pub fn init(&mut self, slice: &[u8]) {
     self.dram.splice(..slice.len(), slice.iter().cloned());
+  }
+
+  pub fn as_slice(&self) -> &[u8] {
+    &self.dram
+  }
+
+  pub fn as_slice_mut(&mut self) -> &mut [u8] {
+    &mut self.dram
   }
 
   pub fn load(&mut self, addr: u64, size: u8) -> Result<u64, Exception> {

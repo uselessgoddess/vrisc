@@ -1,12 +1,12 @@
-use crate::{Cpu, Exception, Trap};
+use crate::{Cpu, Exception};
 
 pub struct Emu {
   pub cpu: Cpu,
 }
 
 impl Emu {
-  pub fn new() -> Self {
-    Self { cpu: Cpu::new() }
+  pub fn new(ram: usize) -> Self {
+    Self { cpu: Cpu::new(ram) }
   }
 
   pub fn with_dram(&mut self, dram: &[u8]) -> &mut Self {
