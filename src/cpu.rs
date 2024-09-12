@@ -80,9 +80,7 @@ impl Cpu {
     }
   }
 
-  pub(crate) fn debug(&self, _inst: u64, _name: &str) {
-    println!("DEBUG INST: {_name}");
-  }
+  pub(crate) fn debug(&self, _inst: u64, _name: &str) {}
 
   /// Translate a virtual address to a physical address for the paged virtual-memory system.
   fn translate(
@@ -111,10 +109,10 @@ impl Cpu {
 
       self.state.store_mstatus(x::MPIE, self.state.load_mstatus(x::MIE));
       self.state.store_mstatus(x::MIE, 0);
-      if let Mode::Machine | Mode::Supervisor | Mode::Supervisor = prev {
+      if let Mode::Machine | Mode::Supervisor | Mode::User = prev {
         self.state.store_mstatus(x::MPP, prev as u64)
       } else {
-        panic!("privilege mode is invalid")
+        panic!("privilege mode is invalid: 0b{:b}", prev as usize)
       }
     }
 
