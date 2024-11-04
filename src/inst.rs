@@ -23,7 +23,7 @@ impl Cpu {
       (inst & 0xfe000000) >> 25,
     );
 
-    Ok(match opcode {
+    match opcode {
       // fences unimplemented because of single-threading and seq execution
       0x0f => match funct3 {
         0x0 => inst!("fence" => {
@@ -37,7 +37,7 @@ impl Cpu {
         }
       },
       0x13 => {
-        let imm = slice![inst in 31:20];
+        let imm = ((inst as i32 as i64) >> 20) as u64;
         let funct6 = funct7 >> 1;
         match funct3 {
           0x0 => inst!("addi" => {
@@ -103,13 +103,33 @@ impl Cpu {
         (0x0, 0x00) => inst!("add" => {
           self.xregs.store(rd, self.xregs.load(rs1).wrapping_add(self.xregs.load(rs2)));
         }),
+        (0x0, 0x20) => inst!("add" => {
+          self.xregs.store(rd, self.xregs.load(rs1).wrapping_sub(self.xregs.load(rs2)));
+        }),
+        (0x2, 0x00) => inst!("slt" => {
+          self.xregs.store(
+            rd,
+            if (self.xregs.load(rs1) as i64) < (self.xregs.load(rs2) as i64) {
+              1
+            } else {
+              0
+            },
+          );
+        }),
+        (0x6, 0x00) => inst!("and" => {
+          self.xregs.store(rd, self.xregs.load(rs1) | self.xregs.load(rs2));
+        }),
+        (0x7, 0x00) => inst!("and" => {
+          self.xregs.store(rd, self.xregs.load(rs1) & self.xregs.load(rs2));
+        }),
         _ => return Err(Exception::IllegalInst(inst)),
       },
       0x37 => inst!("lui" => self.xregs.store(rd, inst & 0xfffff000)),
       0x63 => {
-        let imm = imm![ // see (macros.rs tests)
-          slice![inst in 31:25|11:7] in 12|10:5|4:1|11
-        ];
+        let imm = (((inst & 0x80000000) as i32 as i64 >> 19) as u64)
+            | ((inst & 0x80) << 4) // imm[11]
+            | ((inst >> 20) & 0x7e0) // imm[10:5]
+            | ((inst >> 7) & 0x1e); // imm[4:1]
 
         match funct3 {
           0x0 => inst!("beq" =>
@@ -204,6 +224,7 @@ impl Cpu {
         // TODO: handle SATP register write
       }
       _ => return Err(Exception::IllegalInst(inst)),
-    })
+    };
+    Ok(())
   }
 }

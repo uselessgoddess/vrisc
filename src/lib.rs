@@ -2,7 +2,8 @@
 
 pub mod bus;
 mod cpu;
-mod csr;
+pub mod csr;
+pub mod dev;
 mod dram;
 mod emu;
 mod inst;

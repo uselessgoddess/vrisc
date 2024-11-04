@@ -1,14 +1,20 @@
+#![feature(stmt_expr_attributes)]
+
 use {
   std::{
     alloc::{alloc, dealloc, Layout},
     mem::ManuallyDrop,
     ptr::slice_from_raw_parts_mut,
-    slice,
   },
   vrisc::{Cpu, Emu, REG_COUNT},
+  yuvutils_rs::{YuvRange, YuvStandardMatrix},
 };
 
 pub use vrisc;
+use vrisc::{
+  csr,
+  dev::vga::{VGA_HEIGHT, VGA_WIDTH},
+};
 
 #[repr(u32)]
 pub enum Trap {
@@ -143,6 +149,36 @@ pub struct EmuRepr {
   cpu: CpuRepr,
 }
 
+use {rav1e::prelude::*, yuvutils_rs::rgb_to_yuv444};
+
+type Px = u8;
+type Av1 = rav1e::Context<Px>;
+
+struct Context {
+  emu: Emu,
+  av1: Av1,
+  packets: Vec<Packet<Px>>,
+}
+
+pub fn ctx() -> Config {
+  Config::new().with_encoder_config(EncoderConfig {
+    width: VGA_WIDTH as usize,
+    height: VGA_HEIGHT as usize,
+    chroma_sampling: ChromaSampling::Cs444,
+    ..Default::default()
+  })
+}
+
+impl Context {
+  pub fn new(ram: usize) -> Self {
+    Self {
+      packets: vec![],
+      emu: Emu::new(ram),
+      av1: ctx().new_context().unwrap(),
+    }
+  }
+}
+
 fn layout(len: u64) -> Layout {
   Layout::array::<u8>(len as usize).unwrap()
 }
@@ -158,32 +194,105 @@ pub unsafe extern "C" fn vfree(ptr: *mut u8, len: u64) {
 }
 
 #[no_mangle]
-pub extern "C" fn vempty_emu(ram: u64) -> *mut Emu {
-  Box::into_raw(Box::new(Emu::new(ram as usize)))
+pub extern "C" fn vempty_emu(ram: u64) -> *mut Context {
+  Box::into_raw(Box::new(Context::new(ram as usize)))
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn vfree_emu(emu: *mut Emu) {
-  let _ = unsafe { Box::from_raw(emu) };
+pub unsafe extern "C" fn vfree_emu(ctx: *mut Context) {
+  let _ = unsafe { Box::from_raw(ctx) };
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn vmap_emu(emu: *mut Emu, repr: EmuRepr) {
-  let emu = &mut *emu;
-  repr.cpu.map_to(&mut emu.cpu);
+pub unsafe extern "C" fn vmap_emu(ctx: *mut Context, repr: EmuRepr) {
+  let ctx = &mut *ctx;
+  repr.cpu.map_to(&mut ctx.emu.cpu);
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn vcycle_emu(emu: *mut Emu) -> Trap {
-  let emu = &mut *emu;
-  match emu.cycle() {
+pub unsafe extern "C" fn vcycle_emu(ctx: *mut Context) -> Trap {
+  let ctx = &mut *ctx;
+
+  const SYNC: u64 = 131_072;
+
+  if ctx.emu.cpu.state.load(csr::TIME) % SYNC == 0 {
+    let av1 = &mut ctx.av1;
+    let mut frame = av1.new_frame();
+    let Frame { planes: [y, u, v] } = &mut frame;
+
+    let rgb_stride = VGA_WIDTH as u32;
+
+    #[rustfmt::skip]
+    rgb_to_yuv444(
+      &mut y.data, y.cfg.stride as u32,
+      &mut u.data, u.cfg.stride as u32,
+      &mut v.data, v.cfg.stride as u32,
+      ctx.emu.cpu.bus.vga.buf.as_slice(), rgb_stride,
+      VGA_WIDTH as u32,
+      VGA_HEIGHT as u32,
+      YuvRange::Full,
+      YuvStandardMatrix::Bt601,
+    );
+
+    av1.send_frame(frame).unwrap();
+
+    recv_frames(av1, &mut ctx.packets).unwrap();
+  }
+
+  match ctx.emu.cycle() {
     Ok(_) => Trap::Requested,
-    Err(ex) => emu.cpu.catch_exception(ex).into(),
+    Err(ex) => ctx.emu.cpu.catch_exception(ex).into(),
   }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn vcpu_repr(emu: *const Emu) -> CpuRepr {
-  let emu = &*emu;
-  CpuRepr::from_cpu(&emu.cpu)
+pub unsafe extern "C" fn vcpu_repr(ctx: *const Context) -> CpuRepr {
+  let ctx = &*ctx;
+  CpuRepr::from_cpu(&ctx.emu.cpu)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn vrecv_packets(ctx: *mut Context) -> Slice<Slice<u8>> {
+  let ctx = &mut *ctx;
+
+  let into_slice =
+    move |packet: Packet<Px>| Slice::new(packet.data.into_boxed_slice());
+  Slice::new(ctx.packets.drain(..).map(into_slice).collect())
+}
+
+fn recv_frames(
+  av1: &mut Av1,
+  packets: &mut Vec<Packet<Px>>,
+) -> Result<(), EncoderStatus> {
+  loop {
+    match av1.receive_packet() {
+      Ok(packet) => packets.push(packet),
+      Err(EncoderStatus::LimitReached) => break,
+      Err(EncoderStatus::Failure) => return Err(EncoderStatus::Failure),
+      _ => {}
+    }
+  }
+  Ok(())
+}
+
+fn encode_to_fit(
+  av1: &mut Av1,
+  packets: &mut Vec<Packet<Px>>,
+) -> Result<(), EncoderStatus> {
+  loop {
+    match av1.receive_packet() {
+      Ok(packet) => packets.push(packet),
+      Err(EncoderStatus::NeedMoreData) => av1.flush(),
+      Err(EncoderStatus::LimitReached) => break,
+      Err(EncoderStatus::Failure) => return Err(EncoderStatus::Failure),
+      _ => {}
+    }
+  }
+  Ok(())
+}
+
+#[test]
+fn f() {
+  let x = Context::new(12).av1.new_frame();
+  println!("{}", x.planes[2].cfg.stride);
 }

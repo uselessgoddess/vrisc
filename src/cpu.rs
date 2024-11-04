@@ -1,6 +1,7 @@
 use crate::{
   bus::dram,
   csr::{x, MCAUSE, MEDELEG, MEPC, MTVAL, MTVEC},
+  dev::vga::Vga,
   Bus, Dram, Exception, State, Trap, DRAM_SIZE,
 };
 
@@ -76,7 +77,7 @@ impl Cpu {
       mode: Mode::Machine,
       xregs: Xregs::new(),
       state: State::new(),
-      bus: Bus { dram: Dram::with_capacity(cap) },
+      bus: Bus { vga: Vga::new(), dram: Dram::with_capacity(cap) },
     }
   }
 
