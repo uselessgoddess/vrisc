@@ -3,6 +3,7 @@
 use {
   std::{
     alloc::{alloc, dealloc, Layout},
+    collections::VecDeque,
     mem::ManuallyDrop,
     ptr::slice_from_raw_parts_mut,
   },
@@ -154,10 +155,10 @@ use {rav1e::prelude::*, yuvutils_rs::rgb_to_yuv444};
 type Px = u8;
 type Av1 = rav1e::Context<Px>;
 
-struct Context {
+pub struct Context {
   emu: Emu,
   av1: Av1,
-  packets: Vec<Packet<Px>>,
+  packets: VecDeque<Packet<Px>>,
 }
 
 pub fn ctx() -> Config {
@@ -172,7 +173,7 @@ pub fn ctx() -> Config {
 impl Context {
   pub fn new(ram: usize) -> Self {
     Self {
-      packets: vec![],
+      packets: VecDeque::new(),
       emu: Emu::new(ram),
       av1: ctx().new_context().unwrap(),
     }
@@ -236,7 +237,7 @@ pub unsafe extern "C" fn vcycle_emu(ctx: *mut Context) -> Trap {
 
     av1.send_frame(frame).unwrap();
 
-    recv_frames(av1, &mut ctx.packets).unwrap();
+    recv_frames(av1, &mut ctx.packets, /* to fit */ false).unwrap();
   }
 
   match ctx.emu.cycle() {
@@ -262,37 +263,28 @@ pub unsafe extern "C" fn vrecv_packets(ctx: *mut Context) -> Slice<Slice<u8>> {
 
 fn recv_frames(
   av1: &mut Av1,
-  packets: &mut Vec<Packet<Px>>,
+  packets: &mut VecDeque<Packet<Px>>,
+  fit: bool,
 ) -> Result<(), EncoderStatus> {
   loop {
     match av1.receive_packet() {
-      Ok(packet) => packets.push(packet),
+      Ok(packet) => {
+        if packets.len() > 128 {
+          let _ = packets.pop_front();
+        }
+        packets.push_back(packet)
+      }
+      Err(EncoderStatus::NeedMoreData) => {
+        if fit {
+          av1.flush()
+        } else {
+          break;
+        }
+      }
       Err(EncoderStatus::LimitReached) => break,
       Err(EncoderStatus::Failure) => return Err(EncoderStatus::Failure),
       _ => {}
     }
   }
   Ok(())
-}
-
-fn encode_to_fit(
-  av1: &mut Av1,
-  packets: &mut Vec<Packet<Px>>,
-) -> Result<(), EncoderStatus> {
-  loop {
-    match av1.receive_packet() {
-      Ok(packet) => packets.push(packet),
-      Err(EncoderStatus::NeedMoreData) => av1.flush(),
-      Err(EncoderStatus::LimitReached) => break,
-      Err(EncoderStatus::Failure) => return Err(EncoderStatus::Failure),
-      _ => {}
-    }
-  }
-  Ok(())
-}
-
-#[test]
-fn f() {
-  let x = Context::new(12).av1.new_frame();
-  println!("{}", x.planes[2].cfg.stride);
 }
